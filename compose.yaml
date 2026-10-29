@@ -1,0 +1,18 @@
+name: cicd-practice
+services:
+  api:
+    image: ${APP_IMAGE:-cicd-practice:v1}
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      FAIL_READY: ${FAIL_READY:-0}
+    volumes:
+      - task-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+volumes:
+  task-data:

@@ -1,0 +1,45 @@
+# Salin ke .github/workflows/publish.yml hanya saat mengerjakan lab registry.
+# Workflow ini menerbitkan ke GHCR saat main berubah dan mengulang verifikasi.
+name: Publish verified image
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -v
+      - name: Determine image name
+        shell: bash
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - name: Build once
+        run: docker build --build-arg APP_VERSION="$GITHUB_SHA" -t "$IMAGE:$GITHUB_SHA" .
+      - run: docker run -d --name publish-smoke -p 127.0.0.1:8080:8080 "$IMAGE:$GITHUB_SHA"
+      - run: python scripts/smoke.py http://127.0.0.1:8080 --expect-version "$GITHUB_SHA"
+      - name: Authenticate registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Push the tested image
+        run: docker push "$IMAGE:$GITHUB_SHA"
+      - name: Capture digest
+        shell: bash
+        run: |
+          docker pull "$IMAGE:$GITHUB_SHA"
+          docker image inspect "$IMAGE:$GITHUB_SHA" --format '{{index .RepoDigests 0}}' >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        run: docker logs publish-smoke || true
+      - if: always()
+        run: docker rm -f publish-smoke || true
+      - if: always()
+        run: docker logout ghcr.io
